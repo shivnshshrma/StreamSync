@@ -1,7 +1,8 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { AuthShell, Field, btnPrimary } from "@/components/ss/AuthShell";
-import { setUser } from "@/lib/store";
+import { toast } from "sonner";
+import { api } from "@/lib/api";
 
 export const Route = createFileRoute("/login")({
   head: () => ({
@@ -30,7 +31,8 @@ function Login() {
   const [err, setErr] = useState<
     Partial<Record<"name" | "email" | "pw", string>>
   >({});
-  const submit = (e: React.FormEvent) => {
+  const [loading, setLoading] = useState(false);
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     const er: Partial<Record<"name" | "email" | "pw", string>> = {};
     if (!/^\S+@\S+\.\S+$/.test(email))
@@ -38,11 +40,17 @@ function Login() {
     if (pw.length < 8) er.pw = "Password must be at least 8 characters.";
     setErr(er);
     if (Object.keys(er).length) return;
-    setUser({
-      name: (email.split("@")[0] ?? "").replace(/^\w/, (c) => c.toUpperCase()),
-      email,
-    });
-    nav({ to: "/dashboard" });
+    setLoading(true);
+    try {
+      await api.login(email, pw);
+      nav({ to: "/dashboard" });
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Something went wrong.",
+      );
+    } finally {
+      setLoading(false);
+    }
   };
   return (
     <AuthShell
@@ -83,7 +91,9 @@ function Login() {
             </Link>
           }
         />
-        <button className={btnPrimary + " w-full"}>Log in</button>
+        <button disabled={loading} className={btnPrimary + " w-full"}>
+          {loading ? "Logging in…" : "Log in"}
+        </button>
       </form>
     </AuthShell>
   );
