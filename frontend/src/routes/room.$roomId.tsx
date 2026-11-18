@@ -19,16 +19,15 @@ import {
 import { toast } from "sonner";
 import { Poster } from "@/components/ss/Poster";
 import { PrivacyBadge } from "@/components/ss/Privacy";
-import { btnGhost, btnPrimary } from "@/components/ss/AuthShell";
+import { btnGhost, btnPrimary } from "@/components/ss/buttons";
 import { cn } from "@/lib/utils";
+import { NameGate } from "@/components/ss/NameGate";
 import {
   getRoom,
-  getUser,
   getVideo,
   saveRoom,
   deleteRoom,
   type Room,
-  type User,
 } from "@/lib/store";
 import { sessionMedia } from "@/lib/media";
 
@@ -47,7 +46,7 @@ export const Route = createFileRoute("/room/$roomId")({
       { name: "robots", content: "noindex" },
     ],
   }),
-  component: WatchRoom,
+  component: () => <NameGate>{(name) => <WatchRoom name={name} />}</NameGate>,
 });
 
 type Sync = { playing: boolean; time: number; at: number };
@@ -71,11 +70,10 @@ const fmt = (s: number) => {
 const now = (s: Sync) =>
   s.playing ? s.time + (Date.now() - s.at) / 1000 : s.time;
 
-function WatchRoom() {
+function WatchRoom({ name }: { name: string }) {
   const { roomId } = Route.useParams();
   const nav = useNavigate();
   const [room, setRoom] = useState<Room | null | undefined>(undefined);
-  const [user, setU] = useState<User | null>(null);
   const [sync, setSync] = useState<Sync>({
     playing: false,
     time: 0,
@@ -98,18 +96,12 @@ function WatchRoom() {
   const media = sessionMedia.get(roomId);
 
   useEffect(() => {
-    const u = getUser();
-    if (!u) {
-      nav({ to: "/login", replace: true });
-      return;
-    }
-    setU(u);
     const r = getRoom(roomId) ?? null;
     setRoom(r);
     if (!r) return undefined;
     saveRoom({ ...r, lastActive: new Date().toISOString(), participants: 4 });
     setMembers([
-      { name: u.name, host: true, status: "synced" },
+      { name, host: true, status: "synced" },
       { name: "Jonah", status: "synced" },
       { name: "Priya", status: "synced" },
       { name: "Alex", status: "reconnecting" },
@@ -130,8 +122,7 @@ function WatchRoom() {
       clearInterval(i);
       clearTimeout(t);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roomId, nav]);
+  }, [roomId, name]);
 
   const applyRemote = (s: Sync) => {
     setSyncing(true);
@@ -160,7 +151,7 @@ function WatchRoom() {
     }
   }, [vol, muted]);
 
-  if (room === undefined || !user)
+  if (room === undefined)
     return (
       <div className="grid min-h-screen place-items-center text-sm text-muted-foreground">
         Joining room…
@@ -200,7 +191,7 @@ function WatchRoom() {
   const send = (e: React.FormEvent) => {
     e.preventDefault();
     if (!draft.trim()) return;
-    const msg = { id: crypto.randomUUID(), who: user.name, text: draft.trim() };
+    const msg = { id: crypto.randomUUID(), who: name, text: draft.trim() };
     setMsgs((m) => [...m, msg]);
     ch.current?.postMessage({ type: "chat", msg });
     setDraft("");

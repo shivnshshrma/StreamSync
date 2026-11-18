@@ -5,8 +5,8 @@ import { toast } from "sonner";
 import { AppHeader } from "@/components/ss/AppHeader";
 import { Poster } from "@/components/ss/Poster";
 import { PrivacyBadge } from "@/components/ss/Privacy";
-import { btnPrimary, btnGhost } from "@/components/ss/AuthShell";
-import { api, type ApiUser } from "@/lib/api";
+import { btnPrimary, btnGhost } from "@/components/ss/buttons";
+import { NameGate } from "@/components/ss/NameGate";
 import {
   getRooms,
   getRoom,
@@ -30,33 +30,18 @@ export const Route = createFileRoute("/dashboard")({
       { name: "twitter:card", content: "summary" },
     ],
   }),
-  component: Dashboard,
+  component: () => <NameGate>{(name) => <Dashboard name={name} />}</NameGate>,
 });
 
-function Dashboard() {
+function Dashboard({ name }: { name: string }) {
   const nav = useNavigate();
-  const [user, setU] = useState<ApiUser | null>(null);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [saved, setSaved] = useState<string[]>([]);
   const [code, setCode] = useState("");
   useEffect(() => {
-    let cancelled = false;
-    api
-      .me()
-      .then((u) => {
-        if (cancelled) return;
-        setU(u);
-        setRooms(getRooms());
-        setSaved(getSavedIds());
-      })
-      .catch(() => {
-        if (!cancelled) void nav({ to: "/login", replace: true });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [nav]);
-  if (!user) return null;
+    setRooms(getRooms());
+    setSaved(getSavedIds());
+  }, []);
   const join = (e: React.FormEvent) => {
     e.preventDefault();
     const c = code.trim().toUpperCase();
@@ -72,12 +57,12 @@ function Dashboard() {
   };
   return (
     <div className="min-h-screen">
-      <AppHeader user={user} />
+      <AppHeader name={name} />
       <main className="mx-auto max-w-6xl px-6 py-10">
         <div className="flex flex-wrap items-end justify-between gap-6">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">
-              Good to see you, {user.name.split(" ")[0]}.
+              Good to see you, {name.split(" ")[0]}.
             </h1>
             <p className="mt-1 text-sm text-muted-foreground">
               Pick up where you left off, or open a new room.

@@ -1,35 +1,42 @@
-from django.utils import timezone
 from rest_framework import serializers
-from .models import Room, RoomMember
+from .models import Participant, Room
 
-class MemberSerializer(serializers.ModelSerializer):
-    name = serializers.CharField(source="user.display_name", read_only=True)
-    email = serializers.EmailField(source="user.email", read_only=True)
+class ParticipantSerializer(serializers.ModelSerializer):
+    name = serializers.CharField(source="display_name", read_only=True)
     class Meta:
-        model = RoomMember
-        fields = ("user", "name", "email", "is_host", "joined_at")
+        model = Participant
+        fields = ("id", "name", "is_host", "joined_at")
 
 class RoomSerializer(serializers.ModelSerializer):
-    host = serializers.CharField(source="host.display_name", read_only=True)
-    participants = serializers.SerializerMethodField()
+    host = serializers.SerializerMethodField()
+    participants = ParticipantSerializer(many=True, read_only=True)
     video_id = serializers.UUIDField(source="video.id", read_only=True, allow_null=True)
     class Meta:
         model = Room
         fields = ("id", "name", "code", "host", "privacy", "status", "video_id", "source_type", "participants", "created_at", "last_active")
-        read_only_fields = ("id", "code", "host", "status", "participants", "created_at", "last_active")
-    def get_participants(self, obj):
-        return MemberSerializer(obj.members.select_related("user"), many=True).data
+        read_only_fields = fields
+    def get_host(self, obj):
+        host = obj.host
+        return host.display_name if host else None
+
+def session_response(participant):
+    """Room details plus the caller's own token. Only the caller ever sees the token."""
+    return {
+        "room": RoomSerializer(participant.room).data,
+        "participant": {**ParticipantSerializer(participant).data, "token": participant.token},
+    }
+
+def DisplayName():
+    return serializers.CharField(min_length=1, max_length=100, trim_whitespace=True)
 
 class CreateRoomSerializer(serializers.ModelSerializer):
+    display_name = DisplayName()
     class Meta:
         model = Room
-        fields = ("name", "privacy", "video", "source_type")
-    def validate_video(self, value):
-        if value and value.owner_id != self.context["request"].user.id:
-            raise serializers.ValidationError("You can only use videos you own.")
-        return value
+        fields = ("name", "privacy", "video", "source_type", "display_name")
 
 class JoinSerializer(serializers.Serializer):
+    display_name = DisplayName()
     code = serializers.CharField(min_length=6, max_length=6, required=False)
     invitation = serializers.CharField(required=False)
     def validate(self, attrs):
@@ -41,7 +48,6 @@ class SourceSerializer(serializers.Serializer):
     source_type = serializers.ChoiceField(choices=["uploaded", "local"])
     video = serializers.UUIDField(required=False, allow_null=True)
     def validate(self, attrs):
-        video = attrs.get("video")
-        if attrs["source_type"] == "uploaded" and not video:
+        if attrs["source_type"] == "uploaded" and not attrs.get("video"):
             raise serializers.ValidationError({"video": "An uploaded source requires a video."})
         return attrs

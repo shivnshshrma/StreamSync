@@ -2,108 +2,112 @@ from datetime import timedelta
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from rest_framework import generics, permissions, status
+from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from .models import Invitation, Room, RoomMember
-from .serializers import CreateRoomSerializer, JoinSerializer, MemberSerializer, RoomSerializer, SourceSerializer
+from .auth import participant_from_request
+from .models import Invitation, Participant, Room
 from videos.models import Video
+from .serializers import CreateRoomSerializer, JoinSerializer, RoomSerializer, SourceSerializer, session_response
 
-class RoomAccessMixin:
-    def get_room(self):
-        room = get_object_or_404(Room, pk=self.kwargs["room_id"], status=Room.Status.ACTIVE)
-        if not RoomMember.objects.filter(room=room, user=self.request.user).exists():
-            return None
-        return room
+def not_in_room():
+    return Response({"detail": "You are not in this room."}, status=403)
 
-class RoomListCreateView(generics.ListCreateAPIView):
-    serializer_class = RoomSerializer
-    def get_queryset(self):
-        return Room.objects.filter(members__user=self.request.user).distinct().prefetch_related("members__user")
+def host_only(detail):
+    return Response({"detail": detail}, status=403)
+
+class RoomCreateView(APIView):
     @transaction.atomic
-    def perform_create(self, serializer):
-        room = serializer.save(host=self.request.user)
-        RoomMember.objects.create(room=room, user=self.request.user, is_host=True)
-
-class RoomDetailView(RoomAccessMixin, APIView):
-    def get(self, request, room_id):
-        room = self.get_room()
-        if not room:
-            return Response({"detail": "You are not a member of this room."}, status=403)
-        return Response(RoomSerializer(room, context={"request": request}).data)
+    def post(self, request):
+        serializer = CreateRoomSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        display_name = serializer.validated_data.pop("display_name")
+        room = serializer.save()
+        host = Participant.objects.create(room=room, display_name=display_name, is_host=True)
+        return Response(session_response(host), status=status.HTTP_201_CREATED)
 
 class JoinRoomView(APIView):
+    @transaction.atomic
     def post(self, request):
         serializer = JoinSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        invitation = None
-        if serializer.validated_data.get("invitation"):
+        data = serializer.validated_data
+        if data.get("invitation"):
             invitation = get_object_or_404(
-                Invitation.objects.select_related("room"),
-                token=serializer.validated_data["invitation"],
+                Invitation.objects.select_for_update().select_related("room"),
+                token=data["invitation"],
                 room__status=Room.Status.ACTIVE,
                 used_at__isnull=True,
                 expires_at__gt=timezone.now(),
             )
-            room = invitation.room
             invitation.used_at = timezone.now()
             invitation.save(update_fields=["used_at"])
+            room = invitation.room
         else:
-            room = get_object_or_404(Room, code=serializer.validated_data["code"].upper(), status=Room.Status.ACTIVE)
-            if room.privacy == Room.Privacy.INVITE and room.host_id != request.user.id:
+            room = get_object_or_404(Room, code=data["code"].upper(), status=Room.Status.ACTIVE)
+            if room.privacy == Room.Privacy.INVITE:
                 return Response({"detail": "This room requires an invitation."}, status=403)
-        RoomMember.objects.get_or_create(room=room, user=request.user)
-        return Response(RoomSerializer(room, context={"request": request}).data)
+        participant = Participant.objects.create(room=room, display_name=data["display_name"])
+        return Response(session_response(participant))
 
-class LeaveRoomView(RoomAccessMixin, APIView):
+class RoomDetailView(APIView):
+    def get(self, request, room_id):
+        participant = participant_from_request(request, room_id)
+        if not participant:
+            return not_in_room()
+        return Response(RoomSerializer(participant.room).data)
+
+class LeaveRoomView(APIView):
     def post(self, request, room_id):
-        room = self.get_room()
-        if not room:
-            return Response({"detail": "You are not a member of this room."}, status=403)
-        if room.host_id == request.user.id:
+        participant = participant_from_request(request, room_id)
+        if not participant:
+            return not_in_room()
+        if participant.is_host:
             return Response({"detail": "The host must end the room instead."}, status=400)
-        RoomMember.objects.filter(room=room, user=request.user).delete()
+        participant.delete()
         return Response(status=204)
 
-class InviteView(RoomAccessMixin, APIView):
+class InviteView(APIView):
     def post(self, request, room_id):
-        room = self.get_room()
-        if not room or room.host_id != request.user.id:
-            return Response({"detail": "Only the host can create invitations."}, status=403)
-        invitation = Invitation.objects.create(room=room, invited_by=request.user, expires_at=timezone.now() + timedelta(days=2))
+        participant = participant_from_request(request, room_id)
+        if not participant or not participant.is_host:
+            return host_only("Only the host can create invitations.")
+        invitation = Invitation.objects.create(
+            room=participant.room, invited_by=participant, expires_at=timezone.now() + timedelta(days=2)
+        )
         return Response({"token": invitation.token, "expires_at": invitation.expires_at})
 
-class RemoveMemberView(RoomAccessMixin, APIView):
+class RemoveParticipantView(APIView):
     def post(self, request, room_id):
-        room = self.get_room()
-        if not room or room.host_id != request.user.id:
-            return Response({"detail": "Only the host can remove participants."}, status=403)
-        member = get_object_or_404(RoomMember, room=room, user_id=request.data.get("user_id"))
-        if member.user_id == room.host_id:
+        participant = participant_from_request(request, room_id)
+        if not participant or not participant.is_host:
+            return host_only("Only the host can remove participants.")
+        target = get_object_or_404(Participant, room_id=room_id, pk=request.data.get("participant_id"))
+        if target.is_host:
             return Response({"detail": "The host cannot be removed."}, status=400)
-        member.delete()
+        target.delete()
         return Response(status=204)
 
-class EndRoomView(RoomAccessMixin, APIView):
+class EndRoomView(APIView):
     def post(self, request, room_id):
-        room = self.get_room()
-        if not room or room.host_id != request.user.id:
-            return Response({"detail": "Only the host can end the room."}, status=403)
+        participant = participant_from_request(request, room_id)
+        if not participant or not participant.is_host:
+            return host_only("Only the host can end the room.")
+        room = participant.room
         room.status = Room.Status.ENDED
         room.save(update_fields=["status", "last_active"])
         return Response(status=204)
 
-class SourceView(RoomAccessMixin, APIView):
+class SourceView(APIView):
     def patch(self, request, room_id):
-        room = self.get_room()
-        if not room or room.host_id != request.user.id:
-            return Response({"detail": "Only the host can change the source."}, status=403)
+        participant = participant_from_request(request, room_id)
+        if not participant or not participant.is_host:
+            return host_only("Only the host can change the source.")
         serializer = SourceSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        video = None
-        if serializer.validated_data.get("video"):
-            video = get_object_or_404(Video, pk=serializer.validated_data["video"], owner=request.user)
+        room = participant.room
         room.source_type = serializer.validated_data["source_type"]
-        room.video = video
+        video_id = serializer.validated_data.get("video")
+        room.video = get_object_or_404(Video, pk=video_id) if video_id else None
         room.save(update_fields=["source_type", "video", "last_active"])
-        return Response(RoomSerializer(room, context={"request": request}).data)
+        return Response(RoomSerializer(room).data)
