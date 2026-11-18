@@ -6,15 +6,14 @@ import { AppHeader } from "@/components/ss/AppHeader";
 import { Poster } from "@/components/ss/Poster";
 import { PrivacyBadge } from "@/components/ss/Privacy";
 import { btnPrimary, btnGhost } from "@/components/ss/AuthShell";
+import { api, type ApiUser } from "@/lib/api";
 import {
-  getUser,
   getRooms,
   getRoom,
   getSavedIds,
   getVideo,
   timeAgo,
   type Room,
-  type User,
 } from "@/lib/store";
 
 export const Route = createFileRoute("/dashboard")({
@@ -36,20 +35,26 @@ export const Route = createFileRoute("/dashboard")({
 
 function Dashboard() {
   const nav = useNavigate();
-  const [user, setU] = useState<User | null>(null);
+  const [user, setU] = useState<ApiUser | null>(null);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [saved, setSaved] = useState<string[]>([]);
   const [code, setCode] = useState("");
   useEffect(() => {
-    const u = getUser();
-    if (!u) {
-      void nav({ to: "/login", replace: true });
-      return undefined;
-    }
-    setU(u);
-    setRooms(getRooms());
-    setSaved(getSavedIds());
-    return undefined;
+    let cancelled = false;
+    api
+      .me()
+      .then((u) => {
+        if (cancelled) return;
+        setU(u);
+        setRooms(getRooms());
+        setSaved(getSavedIds());
+      })
+      .catch(() => {
+        if (!cancelled) void nav({ to: "/login", replace: true });
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [nav]);
   if (!user) return null;
   const join = (e: React.FormEvent) => {

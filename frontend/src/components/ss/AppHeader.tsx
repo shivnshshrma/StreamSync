@@ -1,8 +1,12 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import { Logo } from "./Logo";
 import { ThemeToggle } from "./ThemeToggle";
-import { setUser, type User } from "@/lib/store";
-export function AppHeader({ user }: { user: User | null }) {
+import { api, type ApiUser } from "@/lib/api";
+export function AppHeader({
+  user,
+}: {
+  user: Pick<ApiUser, "name" | "email"> | null;
+}) {
   const nav = useNavigate();
   return (
     <header className="border-b border-border">
@@ -16,9 +20,14 @@ export function AppHeader({ user }: { user: User | null }) {
             </span>
           )}
           <button
-            onClick={() => {
-              setUser(null);
-              nav({ to: "/login", replace: true });
+            onClick={async () => {
+              try {
+                await api.logout();
+              } catch {
+                // Tokens are cleared anyway; nothing else to do.
+              } finally {
+                void nav({ to: "/login", replace: true });
+              }
             }}
             className="rounded px-2 py-1 text-muted-foreground hover:text-foreground"
           >

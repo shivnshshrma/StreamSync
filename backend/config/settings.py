@@ -79,7 +79,7 @@ SIMPLE_JWT = {
     "ROTATE_REFRESH_TOKENS": True,
     "BLACKLIST_AFTER_ROTATION": True,
 }
-CORS_ALLOWED_ORIGINS = [os.getenv("FRONTEND_URL", "http://localhost:3000")]
+CORS_ALLOWED_ORIGINS = [os.getenv("FRONTEND_URL", "http://localhost:8080")]
 CSRF_TRUSTED_ORIGINS = CORS_ALLOWED_ORIGINS
 CHANNEL_LAYERS = {
     "default": {
