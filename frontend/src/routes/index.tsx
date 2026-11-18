@@ -13,7 +13,7 @@ import {
 import { Logo } from "@/components/ss/Logo";
 import { ThemeToggle } from "@/components/ss/ThemeToggle";
 import { Poster } from "@/components/ss/Poster";
-import { btnPrimary } from "@/components/ss/AuthShell";
+import { btnPrimary } from "@/components/ss/buttons";
 import { LIBRARY } from "@/lib/store";
 
 export const Route = createFileRoute("/")({
@@ -59,14 +59,8 @@ function Landing() {
         </nav>
         <div className="flex items-center gap-2">
           <ThemeToggle />
-          <Link
-            to="/login"
-            className="px-3 text-sm text-muted-foreground hover:text-foreground"
-          >
-            Log in
-          </Link>
-          <Link to="/signup" className={btnPrimary + " h-9 rounded-full"}>
-            Create an account
+          <Link to="/dashboard" className={btnPrimary + " h-9 rounded-full"}>
+            Open StreamSync
           </Link>
         </div>
       </header>
@@ -86,7 +80,10 @@ function Landing() {
           frame at the same moment — uploaded or streamed from your laptop.
         </p>
         <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-          <Link to="/signup" className={btnPrimary + " h-11 rounded-full px-6"}>
+          <Link
+            to="/rooms/new"
+            className={btnPrimary + " h-11 rounded-full px-6"}
+          >
             <Play className="h-4 w-4" />
             Create a watch room
           </Link>

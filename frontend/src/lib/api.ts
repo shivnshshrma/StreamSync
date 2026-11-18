@@ -1,4 +1,3 @@
-export type ApiUser = { id: number; name: string; email: string };
 export type ApiVideo = {
   id: string;
   title: string;
@@ -8,32 +7,43 @@ export type ApiVideo = {
   thumbnail: string | null;
   playback_url: string | null;
 };
+export type ApiParticipant = {
+  id: number;
+  name: string;
+  is_host: boolean;
+  joined_at: string;
+};
 export type ApiRoom = {
   id: string;
   name: string;
   code: string;
-  host: string;
+  host: string | null;
   privacy: "invite" | "code";
   status: "active" | "ended";
   video_id: string | null;
   source_type: "uploaded" | "local";
-  participants: Array<{
-    user: number;
-    name: string;
-    email: string;
-    is_host: boolean;
-  }>;
+  participants: ApiParticipant[];
   created_at: string;
   last_active: string;
 };
 
-type AuthResponse = { user: ApiUser; access: string; refresh: string };
+// Create and join return the room plus the caller's own participant token.
+export type RoomSession = {
+  room: ApiRoom;
+  participant: ApiParticipant & { token: string };
+};
 const API_URL = import.meta.env["VITE_API_URL"] ?? "http://localhost:8000";
-const ACCESS_KEY = "streamsync.access";
-const REFRESH_KEY = "streamsync.refresh";
 
-const accessToken = () =>
-  typeof window === "undefined" ? null : localStorage.getItem(ACCESS_KEY);
+// There are no accounts. Each room you are in has its own participant token,
+// kept in this browser so a page reload keeps you in the room.
+const tokenKey = (roomId: string) => `streamsync.room.${roomId}`;
+const roomToken = (roomId: string) =>
+  typeof window === "undefined" ? null : localStorage.getItem(tokenKey(roomId));
+
+function saveSession(session: RoomSession) {
+  localStorage.setItem(tokenKey(session.room.id), session.participant.token);
+  return session;
+}
 
 function errorMessage(body: unknown): string {
   // Guard: if body isn't an object (or is null), there's nothing to read.
@@ -49,29 +59,21 @@ function errorMessage(body: unknown): string {
   return "Request failed.";
 }
 
-function clearAuth() {
-  localStorage.removeItem(ACCESS_KEY);
-  localStorage.removeItem(REFRESH_KEY);
-}
-
 type RequestOptions = RequestInit & {
-  // Public endpoints (login, signup) must not send a token: a stale one makes
-  // the backend reject the request before it checks the credentials.
-  auth?: boolean;
+  // Room-scoped requests send that room's participant token.
+  roomId?: string;
 };
 
 async function request<T>(
   path: string,
-  { auth = true, ...init }: RequestOptions = {},
+  { roomId, ...init }: RequestOptions = {},
 ): Promise<T> {
   const headers = new Headers(init.headers);
   if (!(init.body instanceof FormData))
     headers.set("Content-Type", "application/json");
-  const token = auth ? accessToken() : null;
-  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const token = roomId ? roomToken(roomId) : null;
+  if (token) headers.set("X-Participant-Token", token);
   const response = await fetch(`${API_URL}${path}`, { ...init, headers });
-  // The backend rejected our token: drop it so it can't block later requests.
-  if (response.status === 401 && token) clearAuth();
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
     throw new Error(errorMessage(body));
@@ -79,45 +81,7 @@ async function request<T>(
   return response.status === 204 ? (undefined as T) : response.json();
 }
 
-function saveAuth(auth: AuthResponse) {
-  localStorage.setItem(ACCESS_KEY, auth.access);
-  localStorage.setItem(REFRESH_KEY, auth.refresh);
-  return auth.user;
-}
-
 export const api = {
-  async signup(name: string, email: string, password: string) {
-    return saveAuth(
-      await request<AuthResponse>("/api/auth/signup/", {
-        method: "POST",
-        auth: false,
-        body: JSON.stringify({ name, email, password }),
-      }),
-    );
-  },
-  async login(email: string, password: string) {
-    return saveAuth(
-      await request<AuthResponse>("/api/auth/login/", {
-        method: "POST",
-        auth: false,
-        body: JSON.stringify({ email, password }),
-      }),
-    );
-  },
-  async me() {
-    return request<ApiUser>("/api/auth/me/");
-  },
-  async logout() {
-    try {
-      await request<void>("/api/auth/logout/", {
-        method: "POST",
-        body: JSON.stringify({ refresh: localStorage.getItem(REFRESH_KEY) }),
-      });
-    } finally {
-      // Always clear tokens, even if the server is unreachable.
-      clearAuth();
-    }
-  },
   listVideos() {
     return request<ApiVideo[]>("/api/videos/");
   },
@@ -129,35 +93,39 @@ export const api = {
     if (year) body.append("year", String(year));
     return request<ApiVideo>("/api/videos/", { method: "POST", body });
   },
-  listRooms() {
-    return request<ApiRoom[]>("/api/rooms/");
-  },
   getRoom(id: string) {
-    return request<ApiRoom>(`/api/rooms/${id}/`);
+    return request<ApiRoom>(`/api/rooms/${id}/`, { roomId: id });
   },
-  createRoom(input: {
+  async createRoom(input: {
     name: string;
+    display_name: string;
     privacy: "invite" | "code";
     video?: string;
     source_type: "uploaded" | "local";
   }) {
-    return request<ApiRoom>("/api/rooms/", {
-      method: "POST",
-      body: JSON.stringify(input),
-    });
+    return saveSession(
+      await request<RoomSession>("/api/rooms/", {
+        method: "POST",
+        body: JSON.stringify(input),
+      }),
+    );
   },
-  joinRoom(code: string) {
-    return request<ApiRoom>("/api/rooms/join/", {
-      method: "POST",
-      body: JSON.stringify({ code }),
-    });
+  async joinRoom(
+    join: { code: string } | { invitation: string },
+    display_name: string,
+  ) {
+    return saveSession(
+      await request<RoomSession>("/api/rooms/join/", {
+        method: "POST",
+        body: JSON.stringify({ ...join, display_name }),
+      }),
+    );
   },
 };
 
 export function roomSocket(roomId: string) {
-  const token = accessToken();
   const base = API_URL.replace(/^http/, "ws");
   return new WebSocket(
-    `${base}/ws/rooms/${roomId}/?token=${encodeURIComponent(token ?? "")}`,
+    `${base}/ws/rooms/${roomId}/?token=${encodeURIComponent(roomToken(roomId) ?? "")}`,
   );
 }

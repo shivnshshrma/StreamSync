@@ -1,4 +1,4 @@
-// Local demo store (browser only). Replace with Lovable Cloud for real accounts/sync.
+// Local demo store (browser only). Rooms here are mock data until the pages use the API.
 export type Privacy = "invite" | "code";
 export type Video = {
   id: string;
@@ -17,7 +17,6 @@ export type Room = {
   participants: number;
   lastActive: string;
 };
-export type User = { name: string; email: string };
 
 export const LIBRARY: Video[] = [
   {
@@ -69,9 +68,9 @@ const get = <T>(k: string, d: T): T => {
 const set = (k: string, v: unknown) =>
   localStorage.setItem(k, JSON.stringify(v));
 
-export const getUser = () => get<User | null>("ss.user", null);
-export const setUser = (u: User | null) =>
-  u ? set("ss.user", u) : localStorage.removeItem("ss.user");
+// There are no accounts: a display name saved in this browser is all we keep.
+export const getDisplayName = () => get<string | null>("ss.name", null);
+export const setDisplayName = (name: string) => set("ss.name", name);
 export const getRooms = () => get<Room[]>("ss.rooms", []);
 export const getRoom = (id: string) => getRooms().find((r) => r.id === id);
 export const saveRoom = (r: Room) =>

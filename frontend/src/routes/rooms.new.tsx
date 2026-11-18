@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import {
   Upload,
   MonitorUp,
@@ -9,16 +9,10 @@ import {
 } from "lucide-react";
 import { AppHeader } from "@/components/ss/AppHeader";
 import { Poster } from "@/components/ss/Poster";
-import { btnPrimary } from "@/components/ss/AuthShell";
+import { btnPrimary } from "@/components/ss/buttons";
 import { cn } from "@/lib/utils";
-import {
-  getUser,
-  saveRoom,
-  newCode,
-  LIBRARY,
-  type Privacy,
-  type User,
-} from "@/lib/store";
+import { NameGate } from "@/components/ss/NameGate";
+import { saveRoom, newCode, LIBRARY, type Privacy } from "@/lib/store";
 import { sessionMedia } from "@/lib/media";
 
 export const Route = createFileRoute("/rooms/new")({
@@ -38,15 +32,14 @@ export const Route = createFileRoute("/rooms/new")({
       { name: "twitter:card", content: "summary" },
     ],
   }),
-  component: NewRoom,
+  component: () => <NameGate>{(name) => <NewRoom name={name} />}</NameGate>,
 });
 
 const MAX = 4 * 1024 ** 3;
 type Mode = "library" | "upload" | "local";
 
-function NewRoom() {
+function NewRoom({ name: displayName }: { name: string }) {
   const nav = useNavigate();
-  const [user, setU] = useState<User | null>(null);
   const [mode, setMode] = useState<Mode>("library");
   const [name, setName] = useState("Friday Film Club");
   const [privacy, setPrivacy] = useState<Privacy>("invite");
@@ -57,12 +50,6 @@ function NewRoom() {
   const [title, setTitle] = useState("");
   const [desc, setDesc] = useState("");
   const input = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    const u = getUser();
-    if (!u) nav({ to: "/login", replace: true });
-    else setU(u);
-  }, [nav]);
-  if (!user) return null;
 
   const pick = (f?: File) => {
     setErr("");
@@ -137,7 +124,7 @@ function NewRoom() {
 
   return (
     <div className="min-h-screen">
-      <AppHeader user={user} />
+      <AppHeader name={displayName} />
       <main className="mx-auto max-w-3xl px-6 py-10">
         <h1 className="text-2xl font-semibold tracking-tight">
           New watch room
